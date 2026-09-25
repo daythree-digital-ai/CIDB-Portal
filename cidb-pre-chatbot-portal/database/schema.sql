@@ -43,3 +43,6 @@ CREATE TABLE portal_requests (
 CREATE INDEX ix_portal_requests_user_created ON portal_requests (user_id, created_at DESC);
 CREATE INDEX ix_portal_requests_status_created ON portal_requests (status, created_at DESC);
 CREATE INDEX ix_portal_requests_rpa_reference ON portal_requests (rpa_reference_id) WHERE rpa_reference_id IS NOT NULL;
+
+-- psql entry point: use the same additive email migration for fresh and existing databases.
+\ir migrations/20260925_email_reader.sql

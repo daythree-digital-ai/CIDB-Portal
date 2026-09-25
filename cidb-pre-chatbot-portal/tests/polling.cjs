@@ -7,9 +7,10 @@ async function scenario(responses, ids=['request-a']) {
   const timers=new Map(), calls=[];
   let nextTimer=0, ready;
   const containers=ids.map(id=>{
-    const message={textContent:'Waiting'}, status={textContent:'In progress',classList:{remove(){},add(){}},hasAttribute(){return true;}};
-    return {dataset:{requestId:id,requestComplete:'false'},message,status,querySelectorAll(selector){
+    const message={textContent:'Waiting'}, notification={textContent:'Queued'}, status={textContent:'In progress',classList:{remove(){},add(){}},hasAttribute(){return true;}};
+    return {dataset:{requestId:id,requestComplete:'false'},message,notification,status,querySelectorAll(selector){
       if(selector==='[data-request-message]') return [message];
+      if(selector==='[data-notification-message]') return [notification];
       if(selector==='[data-request-status], [data-request-status-dot]') return [status];
       return [];
     }};
@@ -44,7 +45,7 @@ const result=(id,complete,message,status='pending')=>({status:200,body:{id,compl
   assert.equal(flow.timers.size,1);
   await flow.tick();
   assert.equal(flow.containers[0].message.textContent,final);
-  assert.equal(flow.containers[0].status.textContent,'Completed');
+  assert.equal(flow.containers[0].status.textContent,'Success');
   assert.equal(flow.containers[0].dataset.requestComplete,'true');
   assert.equal(flow.timers.size,0, 'Stop once the final message arrives');
 
@@ -63,7 +64,16 @@ const result=(id,complete,message,status='pending')=>({status:200,body:{id,compl
   assert.equal(concurrent.containers[1].message.textContent,'B');
   assert.equal(concurrent.timers.size,1, 'Only the unfinished request keeps polling');
   const failure=await scenario([result('request-a',true,'Unable to complete','failed')]);
-  assert.equal(failure.containers[0].status.textContent,'Needs attention');
+  assert.equal(failure.containers[0].status.textContent,'Failed');
   assert.equal(failure.timers.size,0);
+  const waiting=result('request-a',false,'In progress','processing');
+  waiting.body.rpa_display_message='Obsolete message';
+  const updated=result('request-a',true,'Failed','failed');
+  const statusOnly=await scenario([waiting,updated]);
+  assert.equal(statusOnly.containers[0].status.textContent,'In progress');
+  assert.equal(statusOnly.containers[0].message.textContent,'In progress');
+  await statusOnly.tick();
+  assert.equal(statusOnly.containers[0].status.textContent,'Failed');
+  assert.equal(statusOnly.timers.size,0,'RPA failure completes polling without a display message');
   console.log('Frontend polling regression checks passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

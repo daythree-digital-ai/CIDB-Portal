@@ -1,26 +1,37 @@
 <?php
 declare(strict_types=1);
 
-// Shared by the initial page render and polling: technical responses are never
-// a fallback for the user-facing message.
+// RPA owns status after insertion. HTTP responses and legacy display messages
+// never determine the business outcome for either request source.
 function request_result(array $request): array
 {
-    $message = (string)($request['rpa_display_message'] ?? '');
-    $decoded = json_decode($message, true);
-    // Older submissions stored the entire acknowledgement in this column.
-    if (is_array($decoded) && in_array(strtolower((string)($decoded['status'] ?? $decoded['data']['status'] ?? '')), ['inserted','accepted','queued','pending','processing'], true)) {
-        $message = '';
+    $status=(string)($request['status'] ?? 'processing');
+    $complete=in_array($status,['success','failed'],true);
+    $message=match($status) {
+        'success'=>'Success', 'failed'=>'Failed',
+        default=>'In progress',
+    };
+    $stage=$request['email_stage'] ?? '';
+    if (!$complete && ($request['request_source'] ?? 'form')==='email') {
+        // Local intake/transport problems are separate from the RPA-owned status.
+        if ($stage==='missing_fields') {
+            $missing=$request['email_missing_fields'] ?? [];
+            if (is_string($missing)) $missing=json_decode($missing,true) ?: [];
+            $message='Missing fields: '.implode(', ',$missing).'. RPA not submitted. TL notifications are temporarily disabled.';
+            $complete=true;
+        } elseif (in_array($stage,['extraction_attention','read_error','submission_uncertain','submission_failed'],true)) {
+            $message=match($stage) {
+                'extraction_attention'=>'Email extraction needs review. RPA not submitted.',
+                'read_error'=>'The email could not be read or parsed. RPA not submitted.',
+                'submission_uncertain'=>'RPA acceptance is uncertain. Verify the request before retrying.',
+                default=>'RPA submission failed. No further automatic retry will be made.'
+            };
+            $complete=$stage!=='submission_uncertain';
+        } elseif ($stage==='retry_due') $message='RPA could not be reached. One retry is scheduled.';
+    } elseif (!$complete && !empty($request['error_code'])) {
+        $message='Submission needs review. Waiting for an RPA status update.';
     }
-    $ready = trim($message) !== '';
-    $failed = ($request['status'] ?? '') === 'failed';
-    $submissionFailed = $failed && in_array($request['error_code'] ?? '', ['RPA_REQUEST_FAILED','PROCESSING_ERROR'], true);
-    $status = $failed && ($ready || $submissionFailed) ? 'failed' : ($ready ? 'success' : (($request['status'] ?? '') === 'processing' ? 'processing' : 'pending'));
-    return [
-        'id' => $request['id'],
-        'status' => $status,
-        'complete' => $ready || $submissionFailed,
-        'rpa_display_message' => $ready ? $message : null,
-        'message' => $ready ? $message : ($submissionFailed ? 'We could not process your request. Please try again later.' : 'Your request is being processed. Please wait for the result.'),
-        'completed_at' => ($ready || $submissionFailed) && !empty($request['completed_at']) ? date('d M Y · H:i', strtotime($request['completed_at'])) : ($ready ? 'Completed' : ($submissionFailed ? 'Not available' : 'In progress')),
-    ];
+    $terminal=in_array($status,['success','failed'],true);
+    return ['id'=>$request['id'],'status'=>$status,'complete'=>$complete,'message'=>$message,
+        'completed_at'=>$terminal ? (!empty($request['completed_at']) ? date('d M Y · H:i',strtotime($request['completed_at'])) : 'Not provided by RPA') : ($complete?'Not submitted':'In progress')];
 }
