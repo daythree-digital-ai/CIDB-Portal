@@ -2,7 +2,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll('[data-submit-form]').forEach(form=>{
     const inputs=[...form.querySelectorAll('input[required]:not([type=hidden])')];
     inputs.forEach(input=>input.addEventListener('blur',()=>validate(input)));
-    function validate(input){const box=input.closest('.field'); const err=box.querySelector('.field-error'); let msg=input.value.trim()?'':`${input.labels[0].textContent.replace('*','').trim()} is required.`; if(!msg&&input.type==='email'&&!input.validity.valid) msg='Enter a valid email address.'; if(!msg&&input.name==='contact_number'&&!/^[0-9+() .-]{7,40}$/.test(input.value.trim())) msg='Enter a valid contact number.'; err.textContent=msg; input.setAttribute('aria-invalid',msg?'true':'false'); return !msg;}
+    function validate(input){const box=input.closest('.field'); const err=box.querySelector('.field-error'); let msg=input.value.trim()?'':`${input.labels[0].textContent.replace('*','').trim()} is required.`; if(!msg&&input.type==='email'&&!input.validity.valid) msg='Enter a valid email address.'; err.textContent=msg; input.setAttribute('aria-invalid',msg?'true':'false'); return !msg;}
     form.addEventListener('submit',event=>{let valid=true; inputs.forEach(input=>{if(!validate(input)) valid=false;}); if(!valid){event.preventDefault(); form.querySelector('[aria-invalid=true]')?.focus();return;} const button=form.querySelector('.submit-button');button.disabled=true;button.classList.add('loading');button.querySelector('.button-label').textContent='Submitting request';});
   });
   document.querySelectorAll('.notice').forEach(n=>n.classList.add('visible'));

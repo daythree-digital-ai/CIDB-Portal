@@ -63,8 +63,8 @@ try {
     }
     if ($path === '/submit' && $method === 'POST') {
         if (!csrf_valid()) { flash('error','Your session expired. Please refresh and submit again.'); redirect('/'); }
-        $fields=['name'=>'Name','id_number'=>'ID Number','email'=>'Email','contact_number'=>'Contact Number','location_area'=>'Location Area','crm'=>'CRM']; $input=[]; $errors=[];
-        foreach ($fields as $key=>$label) { $v=trim((string)($_POST[$key]??'')); $maxLength=$key==='name'?200:(in_array($key,['id_number','contact_number'],true)?40:($key==='email'?254:120)); if ($v==='') $errors[$key]="{$label} is required."; elseif (mb_strlen($v)>$maxLength) $errors[$key]="{$label} is too long."; elseif ($key==='email' && filter_var($v,FILTER_VALIDATE_EMAIL)===false) $errors[$key]='Enter a valid email address.'; elseif ($key==='contact_number' && !preg_match('/^[0-9+() .-]{7,40}$/', $v)) $errors[$key]='Enter a valid contact number.'; $input[$key]=$v; }
+        $fields=['name'=>'Name','id_number'=>'ID Number','email'=>'Email','location_area'=>'Location Area','crm'=>'CRM']; $input=[]; $errors=[];
+        foreach ($fields as $key=>$label) { $v=trim((string)($_POST[$key]??'')); $maxLength=$key==='name'?200:($key==='id_number'?40:($key==='email'?254:120)); if ($v==='') $errors[$key]="{$label} is required."; elseif (mb_strlen($v)>$maxLength) $errors[$key]="{$label} is too long."; elseif ($key==='email' && filter_var($v,FILTER_VALIDATE_EMAIL)===false) $errors[$key]='Enter a valid email address.'; $input[$key]=$v; }
         $language=(string)($_POST['language']??''); if (!in_array($language,['en','ms'],true)) $language='ms'; $input['language']=$language;
         if ($errors) { $_SESSION['form_errors']=$errors; $_SESSION['form_values']=$input; redirect('/'); }
         $submissionKey=(string)($_POST['submission_key']??'');

@@ -20,6 +20,8 @@ Independent PHP 8.2 / PostgreSQL application. It does not load or depend on the 
 
 Use HTTPS and set `SESSION_SECURE_COOKIE=true` in a deployed environment. Provision users with the CLI script; no public registration is exposed.
 
+For a database used while CRM was removed, apply `psql -d cidb_portal -f database/migrations/20260924_restore_crm_requirement.sql` before deploying this version. CRM is required for all new portal submissions. Existing requests without CRM retain their original values; the legacy column remains nullable when needed to preserve those records. New databases created from `schema.sql` do not need this migration.
+
 ## Environment
 
 See `.env.example`: `APP_ENV`, `APP_URL`, `SESSION_SECURE_COOKIE`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_TIMEOUT`, `RPA_BOT_ENDPOINT`, `RPA_BOT_API_KEY`, `RPA_BOT_TIMEOUT_MS`, `RPA_BOT_CONNECT_TIMEOUT_MS`, `RPA_COMPANY`, `RPA_SCENARIO_KEY`, and `RPA_CHANNEL`.
