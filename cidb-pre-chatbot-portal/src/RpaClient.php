@@ -12,13 +12,12 @@ final class RpaClient
             'channel' => 'Email',
             'fields' => [
                 'sCustomerType' => 'Individual',
-                'sContactNumber' => $input['contact_number'],
                 'sEmail' => $input['email'],
-                'sLocationArea' => $input['location_area'],
                 'sCustomerName' => $input['name'],
                 'sIdentificationNumber' => $input['id_number'],
                 'sLanguage' => $language,
                 'sChannel' => 'Email',
+                'sLocationArea' => $input['location_area'],
                 'sCRMID' => $input['crm'],
             ],
         ];

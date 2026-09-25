@@ -12,7 +12,7 @@
   </article>
   <article class="details-card">
     <div class="panel-kicker">SUBMITTED INFORMATION</div><h2>Your request fields</h2>
-    <dl class="detail-fields"><div><dt>Name submitted</dt><dd><?= e($request['applicant_name']) ?></dd></div><div><dt>ID Number submitted</dt><dd><?= e($request['id_number']) ?></dd></div><div><dt>Email submitted</dt><dd><?= e($request['applicant_email']) ?></dd></div><div><dt>Contact Number submitted</dt><dd><?= e($payloadFields['sContactNumber'] ?? 'Not available') ?></dd></div><div><dt>Location Area submitted</dt><dd><?= e($payloadFields['sLocationArea'] ?? 'Not available') ?></dd></div><div><dt>CRM submitted</dt><dd><?= e($request['crim']) ?></dd></div><div><dt>Language submitted</dt><dd><?= e(($payloadFields['sLanguage'] ?? 'ms') === 'en' ? 'English' : 'Malay') ?></dd></div></dl>
+    <dl class="detail-fields"><div><dt>Name submitted</dt><dd><?= e($request['applicant_name']) ?></dd></div><div><dt>ID Number submitted</dt><dd><?= e($request['id_number']) ?></dd></div><div><dt>Email submitted</dt><dd><?= e($request['applicant_email']) ?></dd></div><div><dt>Location Area submitted</dt><dd><?= e($payloadFields['sLocationArea'] ?? 'Not available') ?></dd></div><div><dt>CRM submitted</dt><dd><?= e($request['crim'] ?? 'Not available') ?></dd></div><div><dt>Language submitted</dt><dd><?= e(($payloadFields['sLanguage'] ?? 'ms') === 'en' ? 'English' : 'Malay') ?></dd></div></dl>
   </article>
   <article class="details-card response-card">
     <div class="panel-kicker">RPA RESPONSE</div><h2>Response and detail</h2><p class="response-copy" data-request-message aria-live="polite" style="white-space: pre-line"><?= e($responseDetail) ?></p>
