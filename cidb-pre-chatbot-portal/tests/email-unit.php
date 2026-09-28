@@ -10,24 +10,72 @@ use Cidb\Email\{FieldExtractor,EmailRpa,Config,MessageSelector,BodyMessage};
 function expect(bool $condition,string $why): void { if (!$condition) throw new RuntimeException($why); }
 
 $extractor=new FieldExtractor();
-$body="Hi support@example.test,\nTitle: Sample request\nState: Sarawak\nRemarks: For testing\nName: Sample Person\nNRIC: B0012345\nEmail to Cancel ID: customer@example.test";
+$body="Hi support@example.test,\nTitle: Sample request\nState: Sarawak\nRemarks: For testing\nName: Sample Person\nNRIC: B0012345\nCRM: 001234-Ab/56\nEmail to Cancel ID: customer@example.test";
 $result=$extractor->extract(['text'=>$body]);
 expect(!$result['attention'] && !$result['missing'],'Complete template');
-expect(EmailRpa::payload($result['fields'])===['sEmail'=>'customer@example.test','sCustomerName'=>'Sample Person','sIdentificationNumber'=>'B0012345','sLocationArea'=>'Sarawak','sChannel'=>'Email'],'Exact flat payload');
-expect(!array_key_exists('sCRMID',EmailRpa::payload($result['fields'])),'No CRM');
+expect(EmailRpa::payload($result['fields'])===['company'=>'CIDB','scenario_key'=>'cidb_masterbot','channel'=>'Email',
+    'fields'=>['sCRMID'=>'001234-Ab/56','sEmail'=>'customer@example.test','sCustomerName'=>'Sample Person','sCustomerType'=>'Individual','sLocationArea'=>'Sarawak','sIdentificationNumber'=>'B0012345']], 'Exact wrapped email payload without legacy sChannel');
+foreach (['',"State:\n","State:   \t\n"] as $stateLine) {
+    $optional=$extractor->extract(['text'=>str_replace("State: Sarawak\n",$stateLine,$body)]);
+    expect(!$optional['attention'] && !$optional['missing'] && $optional['fields']['state']===null,'Absent or blank State does not block extraction');
+    $expected=EmailRpa::payload($result['fields']); unset($expected['fields']['sLocationArea']);
+    expect(EmailRpa::payload($optional['fields'])===$expected,'Missing State omits only the optional location payload key');
+}
+foreach ([null,''," \t"] as $state) {
+    expect(!array_key_exists('sLocationArea',EmailRpa::payload(array_replace($result['fields'],['state'=>$state]))['fields']),'Null or blank location is omitted');
+}
+$withoutState=$result['fields']; unset($withoutState['state']);
+expect(!array_key_exists('sLocationArea',EmailRpa::payload($withoutState)['fields']),'Absent location key is supported');
+expect($extractor->extract(['text'=>$body."\nState: Selangor"])['attention'],'Conflicting optional State still requires review');
+foreach (['CRM ID','CRMID','sCRMID','crm'] as $label) {
+    $alias=$extractor->extract(['text'=>str_replace('CRM:',$label.':',$body)]);
+    expect(!$alias['attention'] && !$alias['missing'] && EmailRpa::payload($alias['fields'])['fields']['sCRMID']==='001234-Ab/56','CRM aliases preserve identifier case, punctuation and leading zeros');
+}
+$missingCrm=$extractor->extract(['text'=>str_replace("CRM: 001234-Ab/56\n",'',$body)]);
+expect($missingCrm['missing']===['CRM'] && $missingCrm['fields']['crm']===null,'Missing CRM is required without a fabricated fallback');
+expect($extractor->extract(['text'=>$body."\nsCRMID: Other"])['attention'],'Conflicting CRM aliases require review');
+expect($extractor->extract(['text'=>$body."\nCRM: 001234-Ab/56"])['attention'],'Repeated CRM label requires review');
 foreach (FieldExtractor::LABELS as $field=>$label) {
     $partial=preg_replace('/^'.preg_quote($label,'/').':.*$/m',$label.':',$body);
     $missing=$extractor->extract(['text'=>$partial]);
-    expect($missing['missing']===[$label] && $missing['fields'][$field]===null,"Blank $label must not capture next line");
+    expect($missing['missing']===($field==='state'?[]:[$label]) && $missing['fields'][$field]===null,"Blank $label must not capture next line");
 }
 $partial=$extractor->extract(['text'=>"Name:\nNRIC: 001234\nState: Sarawak\nEmail to Cancel ID: a@example.test"]);
 expect($partial['fields']['name']===null && $partial['fields']['nric']==='001234','Blank line and leading zero');
 expect($extractor->extract(['text'=>$body."\nName: Another Person"])['attention'],'Duplicate field requires review');
 expect($extractor->extract(['text'=>'> '.$body])['attention'],'Quoted input requires review');
 expect($extractor->extract(['text'=>$body."\nFrom: previous@example.test"])['attention'],'Forwarded content requires review');
-$html='<html><body><p>Hi support@example.test</p><table><tr><td>Name:</td><td>Sample Person</td></tr><tr><td>NRIC:</td><td>B0012345</td></tr><tr><td>State:</td><td>Sarawak</td></tr><tr><td>Email to Cancel ID:</td><td><a href="mailto:customer@example.test">customer@example.test</a></td></tr></table></body></html>';
+$html='<html><body><p>Hi support@example.test</p><table><tr><td>Name:</td><td>Sample Person</td></tr><tr><td>NRIC:</td><td>B0012345</td></tr><tr><td>State:</td><td>Sarawak</td></tr><tr><td>CRM ID:</td><td>001234-Ab/56</td></tr><tr><td>Email to Cancel ID:</td><td><a href="mailto:customer@example.test">customer@example.test</a></td></tr></table></body></html>';
 expect($extractor->extract(['html'=>$html])['fields']===$result['fields'],'HTML table and mailto');
 expect($extractor->extract(['html'=>'<blockquote>'.$html.'</blockquote>'])['attention'],'HTML quote detection');
+
+foreach ([
+    'test@example.com<mailto:test@example.com>'=>'test@example.com',
+    '  Test.User+tag@EXAMPLE.COM  '=>'Test.User+tag@example.com',
+    'Test Applicant <test@example.com>'=>'test@example.com',
+    'Please use test@example.com (primary account).'=>'test@example.com',
+    'test@example.com.'=>'test@example.com',
+    'mailto:test@example.com'=>'test@example.com',
+    'mailto:test%2Btag@EXAMPLE.COM?subject=Help&cc=other@example.com'=>'test+tag@example.com',
+    'test@example.com&lt;mailto:test@example.com&gt;'=>'test@example.com',
+    '[test@example.com](mailto:test@example.com)'=>'test@example.com',
+    'test@EXAMPLE.COM<mailto:test@example.com>'=>'test@example.com',
+] as $input=>$expected) {
+    $clean=$extractor->extract(['text'=>str_replace('customer@example.test',$input,$body)]);
+    expect(!$clean['attention'] && !$clean['missing'] && $clean['fields']['email']===$expected,'Clean email: '.$input);
+    expect(EmailRpa::payload($clean['fields'])['fields']['sEmail']===$expected,'Only the cleaned address enters the RPA payload');
+    $otherFields=$clean['fields']; unset($otherFields['email']);
+    $originalFields=$result['fields']; unset($originalFields['email']);
+    expect($otherFields===$originalFields,'Email cleanup leaves other fields unchanged');
+}
+foreach (['not-an-email','test@@example.com','test..name@example.com','test@-example.com',
+    'test @example.com','test@example.com@invalid','test@example.com; other@example.com',
+    'test@example.com<mailto:other@example.com>','broken@bad; test@example.com'] as $input) {
+    $invalid=$extractor->extract(['text'=>str_replace('customer@example.test',$input,$body)]);
+    expect($invalid['attention'] && $invalid['fields']['email']===null && in_array('Email to Cancel ID',$invalid['missing'],true),'Invalid or ambiguous email requires review: '.$input);
+}
+$cleanHtml=$extractor->extract(['html'=>str_replace('customer@example.test','test@example.com&lt;mailto:test@example.com&gt;',$html)]);
+expect(!$cleanHtml['attention'] && $cleanHtml['fields']['email']==='test@example.com','HTML email suffix is cleaned');
 
 $raw="From: Agent <agent@example.test>\r\nSubject: =?UTF-8?B?VGVzdCByZXF1ZXN0?=\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n".
     "--x\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n".base64_encode($body)."\r\n".

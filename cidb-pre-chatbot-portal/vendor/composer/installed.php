@@ -3,7 +3,7 @@
         'name' => 'cidb/pre-chatbot-portal',
         'pretty_version' => 'dev-main',
         'version' => 'dev-main',
-        'reference' => '09e162165d10cddc7a3e3c5ff61fc6782e472b5a',
+        'reference' => '083ca26662ed77f4e8d89ca23d408d5e6b63508e',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -22,7 +22,7 @@
         'cidb/pre-chatbot-portal' => array(
             'pretty_version' => 'dev-main',
             'version' => 'dev-main',
-            'reference' => '09e162165d10cddc7a3e3c5ff61fc6782e472b5a',
+            'reference' => '083ca26662ed77f4e8d89ca23d408d5e6b63508e',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

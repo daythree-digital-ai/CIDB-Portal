@@ -45,6 +45,16 @@ try {
     }
     $before=new RequestHistory($pdo);
     verify($before->find($u2,$form)===null && $before->find($u1,$form)!==null,'Pre-migration history remains private');
+    // Regression: a manual migration stopped after adding the source column.
+    $pdo->exec("ALTER TABLE portal_requests ADD COLUMN request_source varchar(8) NOT NULL DEFAULT 'form'");
+    $partial=new RequestHistory($pdo);
+    verify(count($partial->list($u1,'all',5))>=1,'Home loads during a partial migration');
+    verify($partial->find($u1,$form,true)!==null && $partial->find($u2,$form)===null,'Partial migration preserves form ownership');
+    verify($partial->list($u2,'email')===[],'Email filter works without supporting tables');
+    $fixture=$pdo->query($formSql)->fetchColumn();
+    $pdo->exec("UPDATE portal_requests SET request_source='email' WHERE id='$fixture'");
+    verify($partial->find($u2,$fixture,true)['request_source']==='email','Partial migration preserves shared email visibility and details');
+    $pdo->exec("DELETE FROM portal_requests WHERE id='$fixture'");
     $migration=file_get_contents(dirname(__DIR__).'/database/migrations/20260925_email_reader.sql');
     $pdo->exec($migration); $pdo->exec($migration); // Safe to apply twice.
     if ($legacy) $pdo->exec("UPDATE portal_requests SET status='success' WHERE id='$legacy'");
@@ -56,7 +66,7 @@ try {
         'EMAIL_USERNAME'=>'support@example.test','EMAIL_TL_ADDRESS'=>'tl@example.test','EMAIL_NOTIFICATION_MAX_ATTEMPTS'=>'2']);
     $mailbox=new TestMailbox(); $rpa=new TestRpa(); $notifier=new TestNotifier(); $store=new PgStore($pdo,'test-mailbox');
     $processor=new Processor($store,$mailbox,new MessageSelector($config),new FieldExtractor(),$rpa,$notifier,$config);
-    $body="Name: Sample\nEmail to Cancel ID: customer@example.test\nNRIC: B001\nState: Sarawak";
+    $body="Name: Sample\nEmail to Cancel ID: customer@example.test\nNRIC: B001\nState: Sarawak\nCRM ID: 001234-Ab/56";
     $message=['text'=>$body,'sender'=>'agent@example.test','subject'=>'Request','message_id'=>'sample'];
     $mailbox->messages=[10=>$message]; $processor->activate();
     verify((int)$store->state()['activation_uid']===10,'Activation excludes older messages');
@@ -68,11 +78,16 @@ try {
     $notifier->results=[['outcome'=>'safe_failure','error_code'=>'SMTP_CONNECT_FAILED']];
     $counts=$processor->run();
     verify(count($rpa->sent)===1 && count($notifier->sent)===0,'Complete case sent; incomplete notification disabled');
+    verify(array_keys($rpa->sent[0])===['company','scenario_key','channel','fields'] && $rpa->sent[0]['company']==='CIDB' && $rpa->sent[0]['scenario_key']==='cidb_masterbot' && $rpa->sent[0]['channel']==='Email','Exact email envelope reaches dispatch');
+    verify($rpa->sent[0]['fields']['sCRMID']==='001234-Ab/56','Extracted CRM sent exactly to RPA');
+    verify($rpa->sent[0]['fields']['sCustomerType']==='Individual' && $rpa->sent[0]['fields']['sLocationArea']==='Sarawak','Fixed customer type and provided State reach RPA');
     verify((int)$pdo->query('SELECT count(*) FROM portal_email_notifications')->fetchColumn()===0,'No notification jobs while disabled');
     verify($counts['ignored']===1 && $counts['errors']===1,'Errors do not block subsequent emails');
     verify((int)$pdo->query('SELECT count(*) FROM portal_email_intake')->fetchColumn()===5,'Older mail excluded');
     verify($pdo->query("SELECT stage FROM portal_email_intake WHERE message_uid=15")->fetchColumn()==='extraction_attention','Ambiguous identities not sent');
     $complete=$pdo->query('SELECT request_id FROM portal_email_intake WHERE message_uid=11')->fetchColumn();
+    $storedPayload=$pdo->query("SELECT rpa_request_payload FROM portal_requests WHERE id='$complete'")->fetchColumn();
+    verify(json_decode($storedPayload,true)['fields']['sCRMID']==='001234-Ab/56','CRM persists in the stored payload for retries');
     $missing=$pdo->query('SELECT request_id FROM portal_email_intake WHERE message_uid=12')->fetchColumn();
     $history=new RequestHistory($pdo);
     verify($history->find($u2,$form)===null && $history->find($u1,$form)!==null,'Form ownership unchanged');
@@ -87,6 +102,10 @@ try {
     $rpa->results=[['outcome'=>'safe_failure','error_code'=>'CURL_7']];
     $processor->run(); $processor->run();
     verify(count($rpa->sent)===2,'Exactly one safe RPA retry');
+    $firstPayload=$rpa->sent[0]; $retryPayload=$rpa->sent[1];
+    ksort($firstPayload); ksort($retryPayload); // JSONB may reorder object keys.
+    ksort($firstPayload['fields']); ksort($retryPayload['fields']);
+    verify($retryPayload===$firstPayload,'Retry retains the original CRM payload');
     verify(count($notifier->sent)===0,'No SMTP retries while disabled');
     verify(request_result($history->find($u1,$missing))['status']==='processing','Missing case does not write a final RPA status');
     verify($history->find($u1,$complete)['status']==='processing','Transport failures do not write a final RPA status');
@@ -150,6 +169,45 @@ try {
     verify(count($rpa->sent)===$afterFinal,'Final RPA status prevents retry dispatch');
     $finalId=$pdo->query('SELECT request_id FROM portal_email_intake WHERE message_uid=22')->fetchColumn();
     verify(request_result($history->find($u2,$finalId))['message']==='Failed','Failure shown without a display message');
+
+    $mailbox->messages[23]=array_replace($message,['text'=>str_replace("\nCRM ID: 001234-Ab/56",'',$body)]);
+    $mailbox->messages[24]=array_replace($message,['text'=>$body."\nsCRMID: Conflicting-CRM"]);
+    $beforeCrmCases=count($rpa->sent);
+    $processor->run();
+    verify(count($rpa->sent)===$beforeCrmCases,'Missing or conflicting CRM never reaches RPA');
+    verify($pdo->query('SELECT stage FROM portal_email_intake WHERE message_uid=23')->fetchColumn()==='missing_fields','Missing CRM records an incomplete request');
+    verify($pdo->query('SELECT stage FROM portal_email_intake WHERE message_uid=24')->fetchColumn()==='extraction_attention','Conflicting CRM records a review request');
+
+    $mailbox->messages[25]=array_replace($message,['text'=>str_replace('customer@example.test','Customer+tag@EXAMPLE.TEST<mailto:Customer+tag@example.test>',$body)]);
+    $mailbox->messages[26]=array_replace($message,['text'=>str_replace('customer@example.test','not-an-email',$body)]);
+    $mailbox->messages[27]=array_replace($message,['text'=>str_replace('customer@example.test','one@example.test<mailto:two@example.test>',$body)]);
+    $beforeEmailCleanup=count($rpa->sent);
+    $processor->run();
+    verify(count($rpa->sent)===$beforeEmailCleanup+1,'Only the valid cleaned email reaches RPA');
+    verify($rpa->sent[$beforeEmailCleanup]['fields']['sEmail']==='Customer+tag@example.test','RPA receives normalized email without mailto suffix');
+    $cleanRow=$pdo->query('SELECT r.applicant_email,r.rpa_request_payload FROM portal_requests r JOIN portal_email_intake i ON i.request_id=r.id WHERE i.message_uid=25')->fetch();
+    verify($cleanRow['applicant_email']==='Customer+tag@example.test','Stored applicant email is cleaned');
+    verify(json_decode($cleanRow['rpa_request_payload'],true)['fields']['sEmail']===$cleanRow['applicant_email'],'Stored payload matches normalized applicant email');
+    foreach ([26,27] as $uid) {
+        $invalidRow=$pdo->query('SELECT i.stage,r.applicant_email,r.rpa_request_payload FROM portal_requests r JOIN portal_email_intake i ON i.request_id=r.id WHERE i.message_uid='.$uid)->fetch();
+        verify($invalidRow['stage']==='extraction_attention' && $invalidRow['applicant_email']===null && $invalidRow['rpa_request_payload']===null,'Invalid/ambiguous email is held without storing an unclean address or payload');
+    }
+
+    $mailbox->messages[28]=array_replace($message,['text'=>str_replace("\nState: Sarawak",'',$body)]);
+    $mailbox->messages[29]=array_replace($message,['text'=>str_replace('State: Sarawak','State:   ',$body)]);
+    $beforeOptionalState=count($rpa->sent);
+    $optionalCounts=$processor->run();
+    verify(count($rpa->sent)===$beforeOptionalState+2 && $optionalCounts['errors']===0,'Absent and blank State both dispatch without processing errors');
+    foreach ([28,29] as $offset=>$uid) {
+        $sent=$rpa->sent[$beforeOptionalState+$offset];
+        verify($sent['fields']['sCustomerType']==='Individual' && !array_key_exists('sLocationArea',$sent['fields']),'Optional location omitted and customer type included at dispatch');
+        $optionalRow=$pdo->query('SELECT i.stage,i.location_area,i.missing_fields,r.rpa_request_payload FROM portal_requests r JOIN portal_email_intake i ON i.request_id=r.id WHERE i.message_uid='.$uid)->fetch();
+        verify($optionalRow['stage']==='awaiting_result' && $optionalRow['location_area']===null && json_decode($optionalRow['missing_fields'],true)===[],'Missing State is stored without blocking the request');
+        $persisted=json_decode($optionalRow['rpa_request_payload'],true);
+        ksort($persisted); ksort($sent);
+        ksort($persisted['fields']); ksort($sent['fields']);
+        verify($persisted===$sent,'Stored optional-State payload matches dispatch');
+    }
 
     $mailbox->validity=200;
     try { $processor->run(); throw new LogicException('UID validity changed silently'); } catch (RuntimeException $e) { verify(!($e instanceof LogicException),'UID validity mismatch stops reader'); }

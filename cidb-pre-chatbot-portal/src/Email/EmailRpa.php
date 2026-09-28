@@ -6,8 +6,11 @@ final class EmailRpa implements Rpa {
     public function __construct(private readonly string $endpoint, private readonly string $key,
         private readonly int $timeoutMs=15000, private readonly int $connectTimeoutMs=5000) {}
     public static function payload(array $fields): array {
-        return ['sEmail'=>$fields['email'],'sCustomerName'=>$fields['name'],
-            'sIdentificationNumber'=>$fields['nric'],'sLocationArea'=>$fields['state'],'sChannel'=>'Email'];
+        $customer=['sCRMID'=>$fields['crm'],'sEmail'=>$fields['email'],
+            'sCustomerName'=>$fields['name'],'sCustomerType'=>'Individual'];
+        if (isset($fields['state']) && trim($fields['state'])!=='') $customer['sLocationArea']=$fields['state'];
+        $customer['sIdentificationNumber']=$fields['nric'];
+        return ['company'=>'CIDB','scenario_key'=>'cidb_masterbot','channel'=>'Email','fields'=>$customer];
     }
     public function send(array $payload): array {
         if (!filter_var($this->endpoint,FILTER_VALIDATE_URL) || $this->key==='') throw new \RuntimeException('RPA configuration missing');

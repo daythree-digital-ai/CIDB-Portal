@@ -4,17 +4,18 @@
 
 The PHP CLI reader processes post-activation arrivals in the dedicated `CIDB` folder. `EMAIL_FOLDER=CIDB` and `EMAIL_SELECTION_MODE=all` are the configured defaults. All senders are accepted; sender allowlists, subjects, reply headers, and automated-mail headers do not filter this folder's arrivals in `all` mode. Reading the folder does not depend on the unread flag. Extraction still holds conflicting/quoted case data for review rather than silently choosing an identity.
 
-The body labels map to exactly five flat RPA keys:
+The email payload uses the wrapper `company: "CIDB"`, `scenario_key: "cidb_masterbot"`, and `channel: "Email"`. Customer data is nested inside `fields`, with five required keys and one optional location key (no `sChannel`):
 
-| Body label | Payload key |
+| Body label | Key inside `fields` |
 |---|---|
 | `Name:` | `sCustomerName` |
 | `Email to Cancel ID:` | `sEmail` |
 | `NRIC:` | `sIdentificationNumber` |
-| `State:` | `sLocationArea` |
-| Constant `Email` | `sChannel` |
+| `State:` (optional; omitted from payload if absent or blank) | `sLocationArea` |
+| `CRM:` (also `CRM ID:`, `CRMID:`, or `sCRMID:`) | `sCRMID` |
+| Constant `Individual` | `sCustomerType` |
 
-No CRM, scenario wrapper, or request ID is added to email payloads. Form validation and payload mapping remain independent. IDs remain strings. Attachments/OCR are excluded; MIME is fetched to decode its body but attachments are not decoded, extracted or saved. The configurable total message limit defaults to 2 MiB, including attachment bytes.
+CRM is required in the email body and is stored in the RPA payload for dispatch and retries. Its value remains a string, preserving leading zeros, case and punctuation; surrounding whitespace is trimmed. Missing/blank CRM prevents dispatch, and repeated CRM labels (including aliases) require review. No portal request UUID is added. Previously stored payloads are not rewritten; retries reuse their original payload. Form validation and payload mapping remain independent. Attachments/OCR are excluded; MIME is fetched to decode its body but attachments are not decoded, extracted or saved. The configurable total message limit defaults to 2 MiB, including attachment bytes.
 
 ## RPA status owns the result for both sources
 
@@ -30,7 +31,7 @@ New form and email rows start with the existing initial `status='processing'`. F
 
 Local reading/extraction issues and exhausted connection failures remain visible separately from the unchanged RPA status. Cases not submitted to RPA stop polling; uncertain submissions continue polling because RPA may still have accepted them. Form transport errors remain diagnostic and do not invent a final outcome.
 
-The RPA team still needs to confirm how its updater identifies the correct portal row: the email payload has no request ID or CRM. The worker does not invent a correlation field or callback API. A final status written to a different table/row will not complete this portal's polling.
+The RPA team still needs to confirm how its updater identifies the correct portal row: the email payload now includes the extracted CRM, but no portal request UUID. CRM is retained in `rpa_request_payload.fields.sCRMID` for newly extracted requests; the email path does not populate the form's `crim` column. The worker does not invent a callback API. A final status written to a different table/row will not complete this portal's polling.
 
 ## TL notifications temporarily disabled
 
