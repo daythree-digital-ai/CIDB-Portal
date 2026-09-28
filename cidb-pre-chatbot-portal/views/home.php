@@ -15,10 +15,11 @@
   </div>
   <?php if (empty($requests)) { ?>
     <div class="empty-state"><span class="empty-icon" aria-hidden="true">⌁</span><strong>No requests yet</strong><small>Your submitted requests will appear here.</small></div>
-  <?php } else { $labels=['processing'=>'Processing','pending'=>'In progress','success'=>'Completed','failed'=>'Needs attention']; foreach ($requests as $request) { $result=request_result($request); ?>
+  <?php } else { $labels=['processing'=>'In progress','pending'=>'In progress','success'=>'Success','failed'=>'Failed']; foreach ($requests as $request) { $result=request_result($request); ?>
     <a class="request-row request-row-link" href="/request-history/<?= e($request['id']) ?>" data-request-id="<?= e($request['id']) ?>" data-request-complete="<?= $result['complete'] ? 'true' : 'false' ?>">
       <span class="status-dot <?= e($result['status']) ?>" data-request-status-dot></span>
       <div class="request-meta">
+        <span class="request-source"><?= e(strtoupper($request['request_source'] ?? 'form')) ?></span>
         <strong><?= e(substr($request['id'], 0, 8)) ?></strong>
         <small><?= e(date('d M Y · H:i', strtotime($request['created_at']))) ?><?= !empty($request['rpa_reference_id']) ? ' · RPA ' . e($request['rpa_reference_id']) : '' ?></small>
         <small class="response-message" data-request-message aria-live="polite"><?= e($result['message']) ?></small>

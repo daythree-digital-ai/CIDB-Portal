@@ -42,23 +42,14 @@ final class RpaClient
 
     public function normalize(array $response): array
     {
-        $p = $response['parsed']; $status = strtolower((string)($p['result_status'] ?? $p['status'] ?? $p['verification_status'] ?? $p['outcome'] ?? $p['data']['result_status'] ?? $p['data']['status'] ?? ''));
-        $message = (string)($p['rpa_display_message'] ?? $p['display_message'] ?? $p['response_message'] ?? $p['message'] ?? $p['reply_message'] ?? $p['data']['rpa_display_message'] ?? $p['data']['display_message'] ?? $p['data']['response_message'] ?? $p['data']['message'] ?? '');
+        $p = $response['parsed'];
         $scheduleId = $p['schedule_id'] ?? $p['data']['schedule_id'] ?? $p['inserts'][0]['schedule_id'] ?? $p['data']['inserts'][0]['schedule_id'] ?? null;
         $ack = strtolower((string)($p['status'] ?? $p['data']['status'] ?? '')) === 'inserted';
         $ref = $p['external_reference_no'] ?? $p['reference_no'] ?? $p['ticket_no'] ?? $p['ticket_number'] ?? $p['data']['external_reference_no'] ?? $p['data']['reference_no'] ?? $p['data']['ticket_no'] ?? $p['data']['ticket_number'] ?? null;
-        if ($response['error'] !== null || !$response['http_status']) $final = 'failed';
-        elseif ($ack || in_array($status, ['inserted','accepted','queued','pending','processing'], true)) $final = 'pending';
-        elseif (in_array($status, ['deleted','linked','norecord','approved','success','successful','completed'], true)) $final = 'success';
-        elseif (in_array($status, ['error','failed','failure','rejected'], true)) $final = 'failed';
-        elseif ($response['error'] !== null || !$response['http_status'] || $response['parsed'] === null) $final = 'failed';
-        elseif ((int)$response['http_status'] >= 200 && (int)$response['http_status'] < 300) {
-            $messageLower=strtolower($message);
-            $final=(str_contains($messageLower,'failed') || str_contains($messageLower,'error') || str_contains($messageLower,'could not complete')) ? 'failed' : 'success';
-        } else $final = 'failed';
-        if ($final === 'success' && trim($message) === '') $final = 'pending';
-        if ($final === 'pending') $message = '';
         $ref ??= $scheduleId;
-        return ['status'=>$final,'message'=>trim($message),'reference'=>is_scalar($ref) ? (string)$ref : null,'acknowledgement'=>$ack];
+        // Submission diagnostics only. Final status comes from RPA's database update.
+        $error=$response['error']!==null || !$response['http_status'] || $p===null;
+        return ['reference'=>is_scalar($ref) ? (string)$ref : null,'acknowledgement'=>$ack,
+            'error_code'=>$error?'RPA_REQUEST_FAILED':null];
     }
 }

@@ -9,7 +9,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   // Poll only the specific request represented by each existing result area.
   // Keep this before the reduced-motion guard: polling is functional, not animation.
-  const statusLabels={processing:'Processing',pending:'In progress',success:'Completed',failed:'Needs attention'};
+  const statusLabels={processing:'In progress',pending:'In progress',success:'Success',failed:'Failed'};
   document.querySelectorAll('[data-request-id][data-request-complete="false"]').forEach(container=>{
     const requestId=container.dataset.requestId;
     let retryDelay=3000;

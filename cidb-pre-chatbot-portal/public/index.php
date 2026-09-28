@@ -3,7 +3,9 @@ declare(strict_types=1);
 if (PHP_SAPI === 'cli-server') { $static = realpath(__DIR__ . parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH)); if ($static && str_starts_with($static, __DIR__ . DIRECTORY_SEPARATOR) && is_file($static)) return false; }
 require dirname(__DIR__) . '/src/bootstrap.php';
 require dirname(__DIR__) . '/src/RpaClient.php';
+require dirname(__DIR__) . '/src/RpaSubmission.php';
 require dirname(__DIR__) . '/src/request-result.php';
+require dirname(__DIR__) . '/src/RequestHistory.php';
 
 $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
 session_name('cidb_portal');
@@ -37,9 +39,7 @@ try {
         session_write_close();
         if (!$user) { http_response_code(401); echo json_encode(['error'=>'Session expired.']); exit; }
         try {
-            $q=db()->prepare('SELECT id,status,rpa_display_message,completed_at,error_code FROM portal_requests WHERE id=:id AND user_id=:uid LIMIT 1');
-            $q->execute(['id'=>$matches[1],'uid'=>$user['id']]);
-            $request=$q->fetch();
+            $request=(new RequestHistory(db()))->find($user['id'],$matches[1]);
             if (!$request) { http_response_code(404); echo json_encode(['error'=>'Request not found.']); exit; }
             echo json_encode(request_result($request), JSON_THROW_ON_ERROR);
         } catch (Throwable $e) {
@@ -50,14 +50,12 @@ try {
     }
     require_login();
     if ($path === '/request-history' && $method === 'GET') {
-        $q=db()->prepare('SELECT id,status,rpa_reference_id,rpa_http_status,created_at,updated_at,completed_at,rpa_display_message,error_code FROM portal_requests WHERE user_id=:uid ORDER BY created_at DESC');
-        $q->execute(['uid'=>current_user()['id']]);
-        render('request-history',['requests'=>$q->fetchAll()]); exit;
+        $source=is_string($_GET['source']??null) && in_array($_GET['source'],['all','form','email'],true) ? $_GET['source'] : 'all';
+        $requests=(new RequestHistory(db()))->list(current_user()['id'],$source);
+        render('request-history',['requests'=>$requests,'source'=>$source]); exit;
     }
     if (preg_match('#^/request-history/([a-f0-9-]{36})$#i', $path, $matches) && $method === 'GET') {
-        $q=db()->prepare('SELECT id,applicant_name,id_number,applicant_email,crim,status,rpa_http_status,rpa_reference_id,rpa_request_payload,rpa_response,rpa_response_text,rpa_display_message,error_code,error_detail,created_at,updated_at,completed_at FROM portal_requests WHERE id=:id AND user_id=:uid LIMIT 1');
-        $q->execute(['id'=>$matches[1],'uid'=>current_user()['id']]);
-        $request=$q->fetch();
+        $request=(new RequestHistory(db()))->find(current_user()['id'],$matches[1],true);
         if (!$request) { http_response_code(404); render('not-found'); exit; }
         render('request-details',['request'=>$request]); exit;
     }
@@ -76,20 +74,19 @@ try {
             $q=$pdo->prepare("INSERT INTO portal_requests (user_id,submission_key,applicant_name,id_number,applicant_email,crim,rpa_request_payload,status) VALUES (:uid,:key,:name,:idno,:email,:crm,CAST(:payload AS jsonb),'processing') RETURNING id");
             $q->execute(['uid'=>current_user()['id'],'key'=>$submissionKey,'name'=>$input['name'],'idno'=>$input['id_number'],'email'=>$input['email'],'crm'=>$input['crm'],'payload'=>json_encode($payload,JSON_THROW_ON_ERROR)]); $id=$q->fetchColumn();
             $response=$client->send($payload); $normalized=$client->normalize($response);
-            $update=$pdo->prepare("UPDATE portal_requests SET status=CASE WHEN NULLIF(BTRIM(rpa_display_message),'') IS NOT NULL THEN status ELSE :status END,rpa_http_status=:http,rpa_reference_id=:ref,rpa_response=CAST(:response AS jsonb),rpa_response_text=:raw,rpa_display_message=COALESCE(NULLIF(BTRIM(rpa_display_message),''),NULLIF(:message,'')),error_code=:code,error_detail=:detail,updated_at=now(),completed_at=CASE WHEN NULLIF(BTRIM(rpa_display_message),'') IS NOT NULL THEN completed_at WHEN :status2='pending' THEN NULL ELSE now() END WHERE id=:id");
-            $update->execute(['status'=>$normalized['status'],'http'=>$response['http_status'],'ref'=>$normalized['reference'],'response'=>$response['parsed']===null?null:json_encode($response['parsed'],JSON_THROW_ON_ERROR),'raw'=>$response['raw'],'message'=>$normalized['message'],'code'=>$response['error']!==null || ($normalized['status']==='failed' && $normalized['message']==='')?'RPA_REQUEST_FAILED':null,'detail'=>$response['error'],'status2'=>$normalized['status'],'id'=>$id]);
+            RpaSubmission::record($pdo,$id,$response,$normalized);
             $_SESSION['submission_key']=new_uuid();
-            flash($normalized['status']==='failed'?'error':'success','Request '.$id.' — '.($normalized['status']==='pending'?'Your request is being processed.':($normalized['status']==='success'?'Your request has been submitted successfully.':'We could not process your request. Please try again later.')));
+            flash($normalized['error_code']?'error':'success','Request '.$id.' — '.($normalized['error_code']?'Submission needs review.':'Submitted. Waiting for the RPA status update.'));
         } catch (Throwable $e) {
             error_log('Portal request processing failed: '.$e->getMessage());
-            if ($id) { try { $q=$pdo->prepare("UPDATE portal_requests SET status='failed',error_code='PROCESSING_ERROR',error_detail='Request processing failed',updated_at=now(),completed_at=now() WHERE id=:id"); $q->execute(['id'=>$id]); } catch (Throwable $ignored) {} }
+            if ($id) { try { $q=$pdo->prepare("UPDATE portal_requests SET error_code='PROCESSING_ERROR',error_detail='Request processing failed',updated_at=now() WHERE id=:id"); $q->execute(['id'=>$id]); } catch (Throwable $ignored) {} }
             flash('error','We could not process your request at this time. Please try again later.');
             $_SESSION['submission_key']=new_uuid();
         }
         redirect('/');
     }
     if ($path !== '/' && $path !== '/index.php') { http_response_code(404); render('not-found'); exit; }
-    $q=db()->prepare('SELECT id,status,rpa_reference_id,created_at,updated_at,rpa_display_message,error_code FROM portal_requests WHERE user_id=:uid ORDER BY created_at DESC LIMIT 5'); $q->execute(['uid'=>current_user()['id']]);
-    $requests=$q->fetchAll(); $errors=$_SESSION['form_errors']??[]; $values=$_SESSION['form_values']??[]; unset($_SESSION['form_errors'],$_SESSION['form_values']);
+    $requests=(new RequestHistory(db()))->list(current_user()['id'],'all',5);
+    $errors=$_SESSION['form_errors']??[]; $values=$_SESSION['form_values']??[]; unset($_SESSION['form_errors'],$_SESSION['form_values']);
     render('home',['flash'=>take_flash(),'requests'=>$requests,'errors'=>$errors,'values'=>$values]);
 } catch (Throwable $e) { error_log('Portal application error: '.$e->getMessage()); http_response_code(500); render('error'); }

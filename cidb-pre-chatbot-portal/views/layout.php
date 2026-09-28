@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/email.css">
 </head>
 <body>
 <header class="topbar"><a class="brand" href="/" aria-label="CIDB Malaysia Digital Services home"><img class="cidb-logo" src="/assets/images/CIDB-Logo.png" alt="CIDB Malaysia"></a><div class="partner"><img class="daythree-logo daythree-logo-header" src="/assets/images/daythree-logo-1.png" alt="Daythree"></div>
