@@ -29,17 +29,56 @@ See `.env.example`: `APP_ENV`, `APP_URL`, `SESSION_SECURE_COOKIE`, `DB_HOST`, `D
 
 The portal's own environment values are read from `.env`; no chatbot environment file is loaded.
 
+`RPA_COMPANY` and `RPA_SCENARIO_KEY` configure form payloads only. Email payloads use fixed `company: "CIDB"`, `scenario_key: "cidb_masterbot"`, and `channel: "Email"`. Both paths share the RPA endpoint, API key and timeouts. `RPA_CHANNEL` is currently unused; both paths hardcode the channel to `Email`.
+
 ## RPA result polling
 
 The submission response is saved in `rpa_response` / `rpa_response_text` for diagnostics only. New rows start with `status='processing'`; the backend does not subsequently assign the business status. RPA updates that same row's `status` to `success` or `failed`. Both form and email requests show **In progress** until that update, then **Success** or **Failed**. The legacy `rpa_display_message` column is no longer read, written or displayed by result handling.
 
-The home, history and details pages poll `/request-status/{request-id}` every three seconds for the database status. Every lookup requires authentication: users can see their own form requests and shared email requests. Polling retries temporary errors with a delay up to 30 seconds and stops on a final RPA status or loss of access. Local email cases that were not submitted display their separate intake error. Uncertain submissions keep checking for a possible RPA update. Raw HTTP data remains in the technical disclosure and cannot determine the displayed business status.
+The home, history and details pages start polling immediately for each displayed request whose result is incomplete, then repeat three seconds after each successful check. Request IDs come from the existing records rendered on the page, so polling can occur without a new submission. This applies to both form history and shared email history; it does not start the email worker or submit requests to RPA. Every lookup requires authentication: users can see their own form requests and shared email requests. Polling retries temporary errors with a delay up to 30 seconds and stops on a final RPA status or loss of access. Local email cases that were not submitted display their separate intake error and stop polling when review is needed or retries are exhausted. Uncertain submissions keep checking for a possible RPA update. Raw HTTP data remains in the technical disclosure and cannot determine the displayed business status.
 
 Run the regression checks with `php tests/request-result.php` and `node tests/polling.cjs` (Node is only needed for the frontend test). These checks use fixtures and do not submit live RPA requests.
 
-## Email reader (disabled until explicitly activated)
+## Email reader (opt-in CLI worker)
 
-The email module has its own extraction, flat RPA payload, durable processing records, and shared history. It reads all senders in the dedicated `CIDB` folder after activation. TL notification dispatch, templates and retry requirements are temporarily commented out; the TL address is a placeholder. Unexpected incomplete cases remain recorded without sending to RPA. The worker does not start from a web request. Attachments and OCR are excluded.
+The email module has its own extraction, nested RPA payload, durable processing records, and shared history. The visible `CIDB` mailbox folder has the IMAP path `INBOX.CIDB`; explicitly set `EMAIL_FOLDER=INBOX.CIDB`, as in `.env.example`. The code fallback when this setting is omitted is still `CIDB`, which is not the confirmed path for this mailbox. With `EMAIL_SELECTION_MODE=all`, all senders' post-activation arrivals in this folder are eligible. Attachments and OCR are excluded.
+
+`.env.example` disables processing with `EMAIL_ENABLED=false`. The local development `.env` reviewed on 28 September 2026 has `EMAIL_ENABLED=true`; this is not a deployment default or proof that a scheduler is running. Processing requires both enabling the feature and a recorded mailbox baseline (`php bin/email-reader.php activate`, once), followed by manual or scheduled `php bin/email-reader.php run` invocations. Activation excludes messages already in the folder and does not dispatch requests. The worker does not start from a web request.
+
+### Extraction and RPA payload
+
+| Email body label | Key inside `fields` | Requirement |
+|---|---|---|
+| `Name:` | `sCustomerName` | Required |
+| `Email to Cancel ID:` | `sEmail` | Required; cleaned and validated |
+| `NRIC:` | `sIdentificationNumber` | Required |
+| `CRM:`, `CRM ID:`, `CRMID:`, or `sCRMID:` | `sCRMID` | Required |
+| `State:` | `sLocationArea` | Optional; omitted if absent or blank |
+| Fixed value `Individual` | `sCustomerType` | Always included |
+
+Email cleanup removes mail-link suffixes and surrounding text, trims whitespace, and lowercases the domain while preserving the local part. Invalid or ambiguous addresses require review and are not submitted. The same cleaned address is stored and used in the payload. CRM remains a string, preserving leading zeros, case and punctuation after trimming. Missing required fields or ambiguous extraction prevent dispatch; omitting State alone does not.
+
+Newly extracted requests use this structure (customer values below are illustrative, not hardcoded):
+
+```json
+{
+  "company": "CIDB",
+  "scenario_key": "cidb_masterbot",
+  "channel": "Email",
+  "fields": {
+    "sCRMID": "CRM-EXAMPLE-001",
+    "sEmail": "applicant@example.com",
+    "sCustomerName": "Example Applicant",
+    "sCustomerType": "Individual",
+    "sLocationArea": "Selangor",
+    "sIdentificationNumber": "EXAMPLE-ID-001"
+  }
+}
+```
+
+All customer fields are inside `fields`; there is no email `sChannel` field. The API key is sent in the `X-API-Key` header, not the JSON body. Previously stored payloads are not rewritten by code updates: retries reuse the original stored payload, which may have an older structure. Do not reset or blindly resubmit uncertain requests to adopt the new format.
+
+TL notification dispatch, templates and retry requirements are temporarily commented out; the TL address is a placeholder. Unexpected incomplete cases remain recorded without sending to RPA.
 
 Read [the email operations and configuration guide](docs/email-reader.md) before configuring or activating it. Representative extraction samples, RPA row correlation, retention, and production-runtime verification remain launch requirements. TL settings are not currently required. `php bin/email-reader.php check` performs local readiness checks only; `run` with email disabled opens no connections.
 
