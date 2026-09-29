@@ -16,7 +16,7 @@ async function scenario(responses, ids=['request-a']) {
     }};
   });
   vm.runInNewContext(source, {
-    document:{addEventListener(event,fn){ready=fn;},querySelectorAll(selector){return selector.startsWith('[data-request-id]')?containers:[];}},
+    document:{addEventListener(event,fn){ready=fn;},querySelector(){return null;},querySelectorAll(selector){return selector.startsWith('[data-request-id]')?containers:[];}},
     // Functional polling must still run with reduced motion enabled.
     window:{matchMedia(){return {matches:true};}},
     AbortController,

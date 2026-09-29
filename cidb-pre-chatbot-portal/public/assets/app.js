@@ -10,17 +10,24 @@ document.addEventListener('DOMContentLoaded',()=>{
   // Poll only the specific request represented by each existing result area.
   // Keep this before the reduced-motion guard: polling is functional, not animation.
   const statusLabels={processing:'In progress',pending:'In progress',success:'Success',failed:'Failed'};
-  document.querySelectorAll('[data-request-id][data-request-complete="false"]').forEach(container=>{
+  const polling=new Map();
+  const startPolling=(root=document)=>root.querySelectorAll('[data-request-id][data-request-complete="false"]').forEach(container=>{
+    if(polling.has(container)) return;
     const requestId=container.dataset.requestId;
-    let retryDelay=3000;
+    let retryDelay=3000, timer, controller, stopped=false;
+    const stop=()=>{stopped=true;clearTimeout(timer);controller?.abort();polling.delete(container);};
+    polling.set(container,stop);
     const poll=async()=>{
-      const controller=new AbortController();
+      if(stopped || container.isConnected===false){stop();return;}
+      controller=new AbortController();
       const timeout=setTimeout(()=>controller.abort(),15000);
       try {
         const response=await fetch(`/request-status/${encodeURIComponent(requestId)}`,{credentials:'same-origin',cache:'no-store',signal:controller.signal});
-        if([401,403,404].includes(response.status)) return;
+        if(stopped) return;
+        if([401,403,404].includes(response.status)){stop();return;}
         if(!response.ok) throw new Error('Request status unavailable');
         const result=await response.json();
+        if(stopped) return;
         if(result.id!==requestId || !Object.prototype.hasOwnProperty.call(statusLabels,result.status) || typeof result.complete!=='boolean' || typeof result.message!=='string') throw new Error('Invalid request status');
         container.querySelectorAll('[data-request-message]').forEach(element=>{element.textContent=result.message;});
         container.querySelectorAll('[data-request-status], [data-request-status-dot]').forEach(element=>{
@@ -30,7 +37,7 @@ document.addEventListener('DOMContentLoaded',()=>{
         });
         container.querySelectorAll('[data-request-completed]').forEach(element=>{element.textContent=result.completed_at;});
         container.dataset.requestComplete=String(result.complete);
-        if(result.complete) return;
+        if(result.complete){stop();return;}
         retryDelay=3000;
       } catch(error) {
         // A transient failure must not turn an accepted submission into a failure.
@@ -38,10 +45,54 @@ document.addEventListener('DOMContentLoaded',()=>{
       } finally {
         clearTimeout(timeout);
       }
-      setTimeout(poll,retryDelay);
+      if(!stopped) timer=setTimeout(poll,retryDelay);
     };
     poll();
   });
+  startPolling();
+
+  const historyRoot=document.querySelector('[data-request-history]');
+  if(historyRoot){
+    // Background requests retain server-side filtering; the address bar stays clean.
+    if(window.location.search) window.history.replaceState(window.history.state,'','/request-history');
+    let navigation, sequence=0;
+    historyRoot.addEventListener('click',async event=>{
+      const link=event.target.closest('[data-history-link]');
+      if(!link || !historyRoot.contains(link)) return;
+      event.preventDefault();
+      const requestSequence=++sequence;
+      navigation?.abort();
+      const controller=new AbortController(); navigation=controller;
+      const timeout=setTimeout(()=>controller.abort(),15000);
+      const feedback=historyRoot.querySelector('[data-history-feedback]');
+      feedback.textContent='Loading requests…';feedback.hidden=false;
+      historyRoot.setAttribute('aria-busy','true');
+      try {
+        const response=await fetch(link.href,{credentials:'same-origin',cache:'no-store',signal:controller.signal});
+        if(response.redirected || [401,403].includes(response.status)) throw new Error('Your session has expired. Please sign in again.');
+        if(!response.ok) throw new Error('Unable to load requests. Please try again.');
+        const html=await response.text();
+        if(requestSequence!==sequence) return;
+        const next=new DOMParser().parseFromString(html,'text/html').querySelector('[data-request-history]');
+        if(!next || next.dataset.historySource!==link.dataset.historySource) throw new Error('Unable to load requests. Please try again.');
+        // Cancel timers and in-flight polls before removing their request rows.
+        for(const [container,stop] of polling) if(historyRoot.contains(container)) stop();
+        historyRoot.replaceChildren(...next.childNodes);
+        historyRoot.dataset.historySource=next.dataset.historySource;
+        historyRoot.dataset.historyPage=next.dataset.historyPage;
+        startPolling(historyRoot);
+        const focusTarget=link.closest('.history-filters')
+          ? historyRoot.querySelector('.history-filters [aria-current="page"]')
+          : historyRoot.querySelector('.history-pagination [aria-current="page"]') || historyRoot.querySelector('.history-filters [aria-current="page"]');
+        focusTarget?.focus({preventScroll:true});
+      } catch(error) {
+        if(requestSequence===sequence){feedback.textContent=error.name==='AbortError'?'Request timed out. Please try again.':error.message;feedback.hidden=false;}
+      } finally {
+        clearTimeout(timeout);
+        if(requestSequence===sequence) historyRoot.removeAttribute('aria-busy');
+      }
+    });
+  }
 
   const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if(reducedMotion) return;

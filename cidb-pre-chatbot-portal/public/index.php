@@ -51,11 +51,12 @@ try {
     require_login();
     if ($path === '/request-history' && $method === 'GET') {
         $source=is_string($_GET['source']??null) && in_array($_GET['source'],['all','form','email'],true) ? $_GET['source'] : 'all';
-        $requests=(new RequestHistory(db()))->list(current_user()['id'],$source);
-        render('request-history',['requests'=>$requests,'source'=>$source]); exit;
+        $page=is_string($_GET['page']??null) ? filter_var($_GET['page'],FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]) : false;
+        $history=(new RequestHistory(db()))->paginate(current_user()['id'],$source,$page?:1);
+        render('request-history',$history+['source'=>$source]); exit;
     }
     if (preg_match('#^/request-history/([a-f0-9-]{36})$#i', $path, $matches) && $method === 'GET') {
-        $request=(new RequestHistory(db()))->find(current_user()['id'],$matches[1],true);
+        $request=(new RequestHistory(db()))->find(current_user()['id'],$matches[1]);
         if (!$request) { http_response_code(404); render('not-found'); exit; }
         render('request-details',['request'=>$request]); exit;
     }

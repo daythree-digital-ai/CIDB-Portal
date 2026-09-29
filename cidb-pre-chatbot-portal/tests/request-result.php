@@ -44,4 +44,36 @@ foreach (['home','request-history','request-details'] as $view) {
     check(str_contains($html,'In progress'),'Pending UI label');
     check(!str_contains($html,'LEGACY TEXT MUST NOT DISPLAY'),'No legacy display message in UI');
 }
-echo "PHP status-only response and view regression checks passed.\n";
+foreach (['form','email'] as $source) {
+    foreach (['processing','success','failed'] as $status) {
+        $detail=array_replace($request,['request_source'=>$source,'status'=>$status,'email_stage'=>'awaiting_result',
+            'rpa_response'=>json_encode(['runner_id'=>'private-runner-id','runner_name'=>'private-runner-name','schedule_id'=>'private-schedule','control_room_ip'=>'private-control-room']),
+            'rpa_response_text'=>'private-raw-text','rpa_http_status'=>502,'rpa_reference_id'=>'private-reference',
+            'rpa_request_payload'=>json_encode(['company'=>'private-company','fields'=>['sCRMID'=>'CUSTOMER-CRM','sLanguage'=>'en'],'secret'=>'private-payload']),
+            'error_code'=>'PRIVATE_ERROR_CODE','error_detail'=>'private-error-detail',
+            'email_attempts'=>[['attempt_no'=>1,'outcome'=>'private-attempt','http_status'=>502]]]);
+        ob_start(); render('request-details',['request'=>$detail]); $html=ob_get_clean();
+        foreach (['private-','PRIVATE_ERROR_CODE','response-raw','technical-note','HTTP 502','RPA reference ID','Submission attempts','View raw','View email RPA request','TL notification'] as $secret) {
+            check(!str_contains($html,$secret),'Technical information absent from rendered HTML: '.$secret);
+        }
+        check(str_contains($html,'test@example.test') && str_contains($html,'data-request-status'),'Customer fields and live status retained');
+        check(!str_contains($html,'<small>Completed</small>') && !str_contains($html,'Not provided by RPA') && !str_contains($html,'data-request-completed'),'Completion field is not rendered or reintroduced by polling');
+        if ($source==='email') check(str_contains($html,'CUSTOMER-CRM'),'Customer CRM retained without raw payload');
+        if ($status!=='processing') check(str_contains($html,$status==='success'?'Success':'Failed'),'Final status remains visible');
+    }
+}
+foreach ([1,4,10] as $page) {
+    ob_start(); render('request-history',['requests'=>[$request],'source'=>'email','pagination'=>['page'=>$page,'pages'=>10,'total'=>150,'per_page'=>15]]); $html=ob_get_clean();
+    check(strpos($html,'class="history-pagination"')>strpos($html,'class="history-list"'),'Pagination follows request list');
+    check(str_contains($html,'aria-current="page" aria-label="Page '.$page.'"'),'Current page identified');
+    check(str_contains($html,'href="/request-history?source=email&amp;page='),'Pagination preserves filter');
+    check(str_contains($html,'href="/request-history?source=form"'),'Filter navigation resets page');
+    check(str_contains($html,'rel="prev"')===($page>1) && str_contains($html,'rel="next"')===($page<10),'Previous/Next respect boundaries');
+    check(str_contains($html,'&hellip;'),'Long pagination is compact');
+}
+foreach ([0,15] as $total) {
+    ob_start(); render('request-history',['requests'=>$total?[$request]:[],'pagination'=>['page'=>1,'pages'=>1,'total'=>$total,'per_page'=>15]]); $html=ob_get_clean();
+    check(!str_contains($html,'class="history-pagination"'),'Zero to fifteen records need no pagination');
+    if (!$total) check(str_contains($html,'No requests yet'),'Empty state retained');
+}
+echo "PHP status, customer-facing details, pagination controls and view regression checks passed.\n";
