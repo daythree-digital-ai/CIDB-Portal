@@ -17,7 +17,7 @@ function request_result(array $request): array
         if ($stage==='missing_fields') {
             $missing=$request['email_missing_fields'] ?? [];
             if (is_string($missing)) $missing=json_decode($missing,true) ?: [];
-            $message='Missing fields: '.implode(', ',$missing).'. RPA not submitted. TL notifications are temporarily disabled.';
+            $message='Missing fields: '.implode(', ',$missing).'. RPA not submitted.';
             $complete=true;
         } elseif (in_array($stage,['extraction_attention','read_error','submission_uncertain','submission_failed'],true)) {
             $message=match($stage) {

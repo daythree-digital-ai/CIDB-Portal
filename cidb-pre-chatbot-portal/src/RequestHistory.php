@@ -27,15 +27,31 @@ final class RequestHistory {
     private function visibility(): string {
         return $this->hasEmailSchema()?"(r.request_source='email' OR (r.request_source='form' AND r.user_id=:uid))":'r.user_id=:uid';
     }
-    public function list(string $userId, string $source='all', ?int $limit=null): array {
-        if ($userId==='') return [];
+    private function filteredVisibility(string $userId, string $source): array {
+        if ($userId==='') return ['1=0',[]];
         if (!in_array($source,['all','form','email'],true)) $source='all';
-        if (!$this->hasEmailSchema() && $source==='email') return [];
-        $sql=$this->select().' WHERE '.$this->visibility(); $params=['uid'=>$userId];
-        if ($source!=='all' && $this->hasEmailSchema()) { $sql.=' AND r.request_source=:source'; $params['source']=$source; }
+        if (!$this->hasEmailSchema() && $source==='email') return ['1=0',[]];
+        $where=$this->visibility(); $params=['uid'=>$userId];
+        if ($source!=='all' && $this->hasEmailSchema()) { $where.=' AND r.request_source=:source'; $params['source']=$source; }
+        return [$where,$params];
+    }
+    public function list(string $userId, string $source='all', ?int $limit=null, int $offset=0): array {
+        [$where,$params]=$this->filteredVisibility($userId,$source);
+        $sql=$this->select().' WHERE '.$where;
         $sql.=' ORDER BY r.created_at DESC,r.id';
         if ($limit!==null) $sql.=' LIMIT '.max(1,$limit);
+        if ($offset>0) $sql.=' OFFSET '.$offset;
         $q=$this->pdo->prepare($sql); $q->execute($params); return $q->fetchAll();
+    }
+    public function paginate(string $userId, string $source='all', int $page=1): array {
+        $perPage=15;
+        [$where,$params]=$this->filteredVisibility($userId,$source);
+        $q=$this->pdo->prepare('SELECT count(*) FROM portal_requests r WHERE '.$where);
+        $q->execute($params); $total=(int)$q->fetchColumn();
+        $pages=max(1,(int)ceil($total/$perPage));
+        $page=max(1,min($page,$pages));
+        return ['requests'=>$this->list($userId,$source,$perPage,($page-1)*$perPage),
+            'pagination'=>['page'=>$page,'pages'=>$pages,'total'=>$total,'per_page'=>$perPage]];
     }
     public function find(string $userId, string $id, bool $attempts=false): ?array {
         if ($userId==='') return null;

@@ -154,7 +154,7 @@ $request=array_replace($row,['id'=>'00000000-0000-4000-8000-000000000001','creat
 ob_start(); render('request-details',['request'=>$request]); $output=ob_get_clean();
 expect(!str_contains($output,'<script>bad()') && str_contains($output,'&lt;script&gt;bad()'),'Escaped customer content');
 expect(!str_contains($output,'CRM submitted') && !str_contains($output,'Language submitted'),'No form-only email fields');
-expect(str_contains($output,'RPA not submitted') && str_contains($output,'TL notification'),'Missing branch details');
+expect(str_contains($output,'RPA not submitted') && !str_contains($output,'TL notification'),'Missing field explanation without internal notification configuration');
 ob_start(); render('request-history',['requests'=>[$request],'source'=>'email']); $output=ob_get_clean();
 expect(str_contains($output,'?source=form') && str_contains($output,'?source=email') && str_contains($output,'EMAIL'),'History filters and source badge');
 echo "Email extraction, MIME, selection, response, and view checks passed.\n";

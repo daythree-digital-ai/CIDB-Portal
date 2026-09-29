@@ -45,6 +45,7 @@ try {
     }
     $before=new RequestHistory($pdo);
     verify($before->find($u2,$form)===null && $before->find($u1,$form)!==null,'Pre-migration history remains private');
+    verify($before->paginate($u2)['pagination']['total']===0 && $before->paginate($u1,'email')['requests']===[],'Pagination preserves pre-migration visibility');
     // Regression: a manual migration stopped after adding the source column.
     $pdo->exec("ALTER TABLE portal_requests ADD COLUMN request_source varchar(8) NOT NULL DEFAULT 'form'");
     $partial=new RequestHistory($pdo);
@@ -208,6 +209,22 @@ try {
         ksort($persisted['fields']); ksort($sent['fields']);
         verify($persisted===$sent,'Stored optional-State payload matches dispatch');
     }
+
+    // Test exact page boundaries without leaving fixtures in the processor scenarios.
+    $pdo->beginTransaction();
+    $pageUser=$pdo->query("INSERT INTO portal_users(username,password_hash) VALUES ('page-user','unused') RETURNING id")->fetchColumn();
+    $insertPage=$pdo->prepare("INSERT INTO portal_requests(user_id,submission_key,applicant_name,id_number,applicant_email,crim,rpa_request_payload,created_at) SELECT :uid,gen_random_uuid(),'Page','ID','page@example.test','CRM','{}','2026-01-01' FROM generate_series(1,15)");
+    $insertPage->execute(['uid'=>$pageUser]);
+    $fifteen=$history->paginate($pageUser,'form',99);
+    verify(count($fifteen['requests'])===15 && $fifteen['pagination']===['page'=>1,'pages'=>1,'total'=>15,'per_page'=>15],'Exactly fifteen rows stay on one page');
+    $insertPage->execute(['uid'=>$pageUser]);
+    $thirty=$history->paginate($pageUser,'form',99);
+    verify(count($thirty['requests'])===15 && $thirty['pagination']['page']===2 && $thirty['pagination']['pages']===2,'Exactly thirty rows have two full pages');
+    $expected=array_column($history->list($pageUser,'form'),'id');
+    $actual=array_merge(array_column($history->paginate($pageUser,'form')['requests'],'id'),array_column($thirty['requests'],'id'));
+    verify($actual===$expected && count(array_unique($actual))===30,'Equal timestamps use the existing ID tie-breaker across pages');
+    verify($history->paginate('')['requests']===[] && $history->paginate('')['pagination']['total']===0,'Anonymous pagination has no records');
+    $pdo->rollBack();
 
     $mailbox->validity=200;
     try { $processor->run(); throw new LogicException('UID validity changed silently'); } catch (RuntimeException $e) { verify(!($e instanceof LogicException),'UID validity mismatch stops reader'); }
