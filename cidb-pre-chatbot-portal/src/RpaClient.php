@@ -17,7 +17,6 @@ final class RpaClient
                 'sIdentificationNumber' => $input['id_number'],
                 'sLanguage' => $language,
                 'sChannel' => 'Email',
-                'sLocationArea' => $input['location_area'],
                 'sCRMID' => $input['crm'],
             ],
         ];

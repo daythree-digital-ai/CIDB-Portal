@@ -8,6 +8,10 @@ function response(array $parsed,int $http=200): array {
     return ['parsed'=>$parsed,'raw'=>json_encode($parsed),'http_status'=>$http,'error'=>$http>=400?'HTTP error':null];
 }
 $client=new RpaClient();
+$formInput=['name'=>'Test','email'=>'test@example.test','id_number'=>'TEST001','crm'=>'TEST-CRM','language'=>'en'];
+$formPayload=$client->payload($formInput);
+check($formPayload['fields']===['sCustomerType'=>'Individual','sEmail'=>'test@example.test','sCustomerName'=>'Test','sIdentificationNumber'=>'TEST001','sLanguage'=>'en','sChannel'=>'Email','sCRMID'=>'TEST-CRM'],'Form payload keeps all other fields without location');
+check($client->payload($formInput+['location_area'=>'Selangor'])===$formPayload,'Legacy form location input is not sent to RPA');
 $ack=['status'=>'inserted','schedule_id'=>'test-schedule','runner_note'=>'Assigned runner'];
 foreach ([$ack,['status'=>'success','display_message'=>'Old message'],['status'=>'failed']] as $payload) {
     $normalized=$client->normalize(response($payload));

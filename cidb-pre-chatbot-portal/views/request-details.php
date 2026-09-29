@@ -23,7 +23,7 @@
       <div><dt>Sender</dt><dd><?= e($request['email_sender'] ?? 'Not available') ?></dd></div>
     </dl>
     <?php else: ?>
-    <dl class="detail-fields"><div><dt>Name submitted</dt><dd><?= e($request['applicant_name']) ?></dd></div><div><dt>ID Number submitted</dt><dd><?= e($request['id_number']) ?></dd></div><div><dt>Email submitted</dt><dd><?= e($request['applicant_email']) ?></dd></div><div><dt>Location Area submitted</dt><dd><?= e($payloadFields['sLocationArea'] ?? 'Not available') ?></dd></div><div><dt>CRM submitted</dt><dd><?= e($request['crim'] ?? 'Not available') ?></dd></div><div><dt>Language submitted</dt><dd><?= e(($payloadFields['sLanguage'] ?? 'ms') === 'en' ? 'English' : 'Malay') ?></dd></div></dl>
+    <dl class="detail-fields"><div><dt>Name submitted</dt><dd><?= e($request['applicant_name']) ?></dd></div><div><dt>ID Number submitted</dt><dd><?= e($request['id_number']) ?></dd></div><div><dt>Email submitted</dt><dd><?= e($request['applicant_email']) ?></dd></div><div><dt>CRM submitted</dt><dd><?= e($request['crim'] ?? 'Not available') ?></dd></div><div><dt>Language submitted</dt><dd><?= e(($payloadFields['sLanguage'] ?? 'ms') === 'en' ? 'English' : 'Malay') ?></dd></div></dl>
     <?php endif; ?>
   </article>
   <article class="details-card response-card">
